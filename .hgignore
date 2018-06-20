@@ -7,3 +7,9 @@ curved-domain
 *.eps
 *.pdf
 *.ppm
+Debug/*
+Release/*
+*.filters
+*.db
+*.opendb
+*.user

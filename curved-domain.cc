@@ -3,6 +3,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <stack>
 #include <vector>
 
@@ -209,13 +210,28 @@ int main(int argc, char **argv) {
         pv.push_back(points[k][0]); pv.push_back(points[k][1]); pv.push_back(k == i ? 1.0 : 0.0);
       } while(concave[k]);
       if (pv.size() == 6)
-        harmonic_add_line(map, &pv[0], &pv[1]);
-      else
-        harmonic_add_curve(map, &pv[0], pv.size() / 3);
+        harmonic_add_line(map, &pv[0], &pv[3]);
+      else {
+        size_t m = pv.size() / 3;
+        double from = pv[2], to = pv[m*3-1];
+        if (from != to) {
+          // Distribute the weights evenly
+          for (size_t k = 1; k < m - 1; ++k) {
+            double alpha = (double)k / (m - 1);
+            pv[k*3+2] = std::max(from * (1.0 - alpha) + to * alpha, 0.0);
+          }
+        }
+        harmonic_add_curve(map, &pv[0], m);
+      }
     }
     harmonic_solve(map, EPSILON, false);
     parameters.push_back(map);
+    // PPM output
+    std::stringstream ppm;
+    ppm << "harmonic" << i << ".ppm";
+    harmonic_write_ppm(map, ppm.str().c_str());
   }
+  size_t m = parameters.size();
 
   // Compute the l,s,h values
   TriMesh mesh = regularMesh(points, LEVELS);
@@ -223,11 +239,11 @@ int main(int argc, char **argv) {
   for (size_t lhs = 0; lhs < 3; ++lhs)
     values[lhs].reserve(mesh.points().size());
   for (const auto &p : mesh.points()) {
-    DoubleVector bc(parameters.size(), 0.0);
-    for (size_t i = 0; i < n; ++i)
+    DoubleVector bc(m, 0.0);
+    for (size_t i = 0; i < m; ++i)
       harmonic_eval(parameters[i], p.data(), &bc[i]);
     PointVector l, h, s;
-    for (size_t i = 0; i < parameters.size(); ++i) {
+    for (size_t i = 0; i < m; ++i) {
       Point2D sd = barycentricSD(bc, i);
       l.emplace_back(p[0], p[1], bc[i]);
       h.emplace_back(p[0], p[1], sd[1]);
@@ -243,7 +259,7 @@ int main(int argc, char **argv) {
     auto scale = [](Point2D p) { return (p + Point2D(1,1)) * 250 + Point2D(50,50); };
     std::ofstream f("curved-domain.eps");
     for (size_t lhs = 0; lhs < 3; ++lhs)
-      for (size_t i = 0; i < parameters.size(); ++i) {
+      for (size_t i = 0; i < m; ++i) {
         f << "1 0 0 setrgbcolor\n"
           << "newpath\n";
         auto q = scale(points.back());

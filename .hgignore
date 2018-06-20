@@ -4,3 +4,6 @@ syntax: glob
 .#*
 *.so
 curved-domain
+*.eps
+*.pdf
+*.ppm

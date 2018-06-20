@@ -14,7 +14,7 @@ using namespace Geometry;
 
 const size_t LEVELS = 9;
 const double EPSILON = 1.0e-5;
-const size_t RESOLUTION = 50;
+const size_t RESOLUTION = 50;   // Bezier curve resolution
 
 TriMesh regularMesh(const Point2DVector &domain, size_t size) {
   size_t n = (size_t)std::pow(2, size);
@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
             pv[k*3+2] = std::max(from * (1.0 - alpha) + to * alpha, 0.0);
           }
         }
-        harmonic_add_curve(map, &pv[0], m);
+        harmonic_add_curve(map, &pv[0], m, RESOLUTION);
       }
     }
     harmonic_solve(map, EPSILON, false);
@@ -195,7 +195,7 @@ int main(int argc, char **argv) {
     // PPM output
     std::stringstream ppm;
     ppm << "harmonic" << i << ".ppm";
-    harmonic_write_ppm(map, ppm.str().c_str());
+    // harmonic_write_ppm(map, ppm.str().c_str());
   }
   size_t m = parameters.size();
 

@@ -13,81 +13,27 @@
 using namespace Geometry;
 
 const size_t LEVELS = 9;
-const double DENSITY = 0.05;
 const double EPSILON = 1.0e-5;
+const size_t RESOLUTION = 50;
 
-void floodFill(std::vector<bool> &grid, size_t n, size_t x, size_t y) {
-  using Coord = std::pair<size_t, size_t>;
-  std::stack<Coord> ps;
-  ps.push({x, y});
-  do {
-    size_t x = ps.top().first, y = ps.top().second; // auto [x, y] = ps.top();
-    ps.pop();
-    if (grid[y*n+x])
-      continue;
-    grid[y*n+x] = true;
-    if (x > 0)     ps.push({x - 1, y});
-    if (x < n - 1) ps.push({x + 1, y});
-    if (y > 0)     ps.push({x,     y - 1});
-    if (y < n - 1) ps.push({x,     y + 1});
-  } while (!ps.empty());
-}
-
-// Generates a mesh using a discretization of the domain (using a bitmap of size 2^size).
-// Assumes that domain is in [-1,1]x[-1,1].
 TriMesh regularMesh(const Point2DVector &domain, size_t size) {
   size_t n = (size_t)std::pow(2, size);
-  std::vector<bool> grid(n * n, false);
   Point2D offset(-1.05, -1.05);
   double scaling = n / 2.1;
 
-  // Init
-  Point2D p0 = (domain.back() - offset) * scaling;
-  int x0 = (int)p0[0], y0 = (int)p0[1];
-  for (const auto &p : domain) {
-    Point2D p1 = (p - offset) * scaling;
-    int x1 = (int)p1[0], y1 = (int)p1[1];
-    int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = (dx > dy ? dx : -dy) / 2, e2;
-    while (true) {
-      grid[y0*n+x0] = true;
-      if (x0 == x1 && y0 == y1)
-        break;
-      e2 = err;
-      if (e2 > -dx) { err -= dy; x0 += sx; }
-      if (e2 <  dy) { err += dx; y0 += sy; }
-    }
-  }
-  floodFill(grid, n, 0, 0);
-
-  // Build mesh
-  std::vector<size_t> row(n);
   PointVector pv;
   TriMesh result;
-  size_t index = 0;
 
-  for (size_t j = 1; j < n; ++j) {
+  for (size_t j = 0; j < n - 1; ++j) {
     for (size_t i = 0; i < n - 1; ++i) {
-      if (grid[j*n+i])
-        continue;
-
-      if (grid[(j-1)*n+i+1]) {
-        // no NE
-        if (!grid[(j-1)*n+i] && !grid[j*n+i+1])
-          result.addTriangle(index, row[i], index + 1);   // N & E
-      } else {
-        // NE
-        if (!grid[(j-1)*n+i])
-          result.addTriangle(index, row[i], row[i+1]);    // N & NE
-        if (!grid[j*n+i+1])
-          result.addTriangle(index, row[i+1], index + 1); // E & NE
-      }
-
-      pv.emplace_back((double)i / scaling + offset[0], (double)j / scaling + offset[1], 0.0);
-      row[i] = index++;
+      result.addTriangle(i*n+j, i*n+j+1, (i+1)*n+j);
+      result.addTriangle((i+1)*n+j, i*n+j+1, (i+1)*n+j+1);
     }
   }
+
+  for (size_t j = 0; j < n; ++j)
+    for (size_t i = 0; i < n; ++i)
+      pv.emplace_back((double)i / scaling + offset[0], (double)j / scaling + offset[1], 0.0);
 
   result.setPoints(pv);
   return result;
@@ -153,16 +99,36 @@ Point2D barycentricSD(const DoubleVector &bc, size_t i) {
   return Point2D(s, d);
 }
 
+void bernsteinAll(size_t n, double u, DoubleVector &coeff) {
+  coeff.clear(); coeff.reserve(n + 1);
+  coeff.push_back(1.0);
+  double u1 = 1.0 - u;
+  for (size_t j = 1; j <= n; ++j) {
+    double saved = 0.0;
+    for (size_t k = 0; k < j; ++k) {
+      double tmp = coeff[k];
+      coeff[k] = saved + tmp * u1;
+      saved = tmp * u;
+    }
+    coeff.push_back(saved);
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " domain.dom" << std::endl;
+    std::cerr << "Usage: " << argv[0] << " domain.dom [density]" << std::endl;
+    std::cerr << "Density defaults to 0.1." << std::endl;
     return 1;
   }
+
+  double density = 0.1;
+  if (argc > 2)
+    density = std::stod(argv[2]);
 
   // Read the domain from the given file
   // Format:
   // 4                     ; # of vertices (including concave corners)
-  // 0 0 1 0               ; 0 for convex, 1 for concave
+  // 0 0 1 0               ; 0 for convex, 1 for concave [i.e., internal Bezier control point]
   // 0 0                   ; 1st vertex
   // 4 1                   ; 2nd vertex
   // 3 0                   ; 3rd vertex
@@ -208,7 +174,7 @@ int main(int argc, char **argv) {
       do {
         k = (k + 1) % n;
         pv.push_back(points[k][0]); pv.push_back(points[k][1]); pv.push_back(k == i ? 1.0 : 0.0);
-      } while(concave[k]);
+      } while (concave[k]);
       if (pv.size() == 6)
         harmonic_add_line(map, &pv[0], &pv[3]);
       else {
@@ -236,22 +202,21 @@ int main(int argc, char **argv) {
   // Compute the l,s,h values
   TriMesh mesh = regularMesh(points, LEVELS);
   std::vector<PointVector> values[3];
-  for (size_t lhs = 0; lhs < 3; ++lhs)
-    values[lhs].reserve(mesh.points().size());
+  for (size_t lhs = 0; lhs < 3; ++lhs) {
+    values[lhs].resize(m);
+    for (size_t i = 0; i < m; ++i)
+      values[lhs][i].reserve(mesh.points().size());
+  }
   for (const auto &p : mesh.points()) {
     DoubleVector bc(m, 0.0);
     for (size_t i = 0; i < m; ++i)
       harmonic_eval(parameters[i], p.data(), &bc[i]);
-    PointVector l, h, s;
     for (size_t i = 0; i < m; ++i) {
       Point2D sd = barycentricSD(bc, i);
-      l.emplace_back(p[0], p[1], bc[i]);
-      h.emplace_back(p[0], p[1], sd[1]);
-      s.emplace_back(p[0], p[1], sd[0]);
+      values[0][i].emplace_back(p[0], p[1], bc[i]);
+      values[1][i].emplace_back(p[0], p[1], sd[1]);
+      values[2][i].emplace_back(p[0], p[1], sd[0]);
     }
-    values[0].push_back(l);
-    values[1].push_back(h);
-    values[2].push_back(s);
   }
 
   // Write the PS output
@@ -260,17 +225,47 @@ int main(int argc, char **argv) {
     std::ofstream f("curved-domain.eps");
     for (size_t lhs = 0; lhs < 3; ++lhs)
       for (size_t i = 0; i < m; ++i) {
+        // Draw the domain in red
         f << "1 0 0 setrgbcolor\n"
           << "newpath\n";
-        auto q = scale(points.back());
-        f << q[0] << ' ' << q[1] << " moveto\n";
-        for (const auto &p : points) {
-          auto q = scale(p);
-          f << q[0] << ' ' << q[1] << " lineto\n";
+        bool first = true;
+        for (size_t j = 0; j < n; ++j) {
+          if (concave[j])
+            continue;
+          if (first) {
+            first = false;
+            auto q = scale(points[j]);
+            f << q[0] << ' ' << q[1] << " moveto\n";
+          }
+          Point2DVector pv;
+          pv.push_back(scale(points[j]));
+          size_t k = j;
+          do {
+            k = (k + 1) % n;
+            pv.push_back(scale(points[k]));            
+          } while (concave[k]);
+          if (pv.size() == 2) {
+            // Line
+            auto &q = pv.back();
+            f << q[0] << ' ' << q[1] << " lineto\n";
+          } else {
+            // Bezier curve
+            DoubleVector coeff;
+            size_t d = pv.size() - 1;
+            for (size_t k = 1; k <= RESOLUTION; ++k) {
+              double u = (double)k / RESOLUTION;
+              bernsteinAll(d, u, coeff);
+              Point2D q(0.0, 0.0);
+              for (size_t l = 0; l <= d; ++l)
+                q += pv[l] * coeff[l];
+              f << q[0] << ' ' << q[1] << " lineto\n";
+            }
+          }
         }
-        f << "stroke\n"
-          << "0 0 0 setrgbcolor" << std::endl;
-        writeContours(f, scale, mesh, values[lhs][i], DENSITY);
+        f << "stroke\n";
+        // Draw the contours in black
+        f << "0 0 0 setrgbcolor" << std::endl;
+        writeContours(f, scale, mesh, values[lhs][i], density);
         f << "showpage" << std::endl;
       }
   }

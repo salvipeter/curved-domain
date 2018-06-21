@@ -13,3 +13,4 @@ Release/*
 *.db
 *.opendb
 *.user
+compile

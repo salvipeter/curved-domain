@@ -177,8 +177,18 @@ int main(int argc, char **argv) {
       } while (concave[k]);
       if (pv.size() == 6)
         harmonic_add_line(map, &pv[0], &pv[3]);
-      else
-        harmonic_add_curve(map, &pv[0], pv.size() / 3);
+      else {
+        size_t m = pv.size() / 3;
+        double from = pv[2], to = pv[m*3-1];
+        if (from != to) {
+          // Distribute the weights evenly
+          for (size_t k = 1; k < m - 1; ++k) {
+            double alpha = (double)k / (m - 1);
+            pv[k*3+2] = std::max(from * (1.0 - alpha) + to * alpha, 0.0);
+          }
+        }
+        harmonic_add_curve(map, &pv[0], m);
+      }
     }
     harmonic_solve(map, EPSILON, false);
     parameters.push_back(map);
